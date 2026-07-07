@@ -125,7 +125,6 @@ function AttendanceApp() {
     if (remaining.closed || sending) return;
     if (!name.trim() || !practice || !afterparty) return;
     if (timeNeeded && !practiceTime) return;
-    if (menuNeeded && !menu) return;
     if (!sb) {
       alert("Supabase 설정이 아직 안 됐어요. 파일 상단의 URL/KEY를 입력해 주세요.");
       return;
@@ -173,8 +172,7 @@ function AttendanceApp() {
     name.trim() &&
     practice &&
     afterparty &&
-    (!timeNeeded || practiceTime) &&
-    (!menuNeeded || menu);
+    (!timeNeeded || practiceTime);
 
   return (
     <div style={s.root}>
