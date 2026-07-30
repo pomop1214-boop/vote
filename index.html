@@ -22,7 +22,7 @@
 <div id="root"></div>
 
 <!-- ===================================================================== -->
-<!-- ▼▼▼ 여기 두 줄만 본인 Supabase 값으로 바꾸세요 (가이드 참고) ▼▼▼ -->
+<!-- ▼▼▼ 여기 두 줄만 본인 Supabase 값으로 바꾸세요 ▼▼▼ -->
 <script>
   window.SUPABASE_URL = "https://ipklnamaievuwnkjmndq.supabase.co";
   window.SUPABASE_ANON_KEY = "sb_publishable_Aen_4oBejenDR_3zojgiSg_uMEdUD_U";
@@ -37,14 +37,32 @@ const STATUS = {
   yes: { label: "참석", color: "#2f7d4f", bg: "#e6f4ea" },
   no: { label: "불참", color: "#b23b3b", bg: "#fbe9e9" },
 };
-const MENUS = {
-  movie: { label: "영화", sub: "토이스토리 5 등", emoji: "🎬", color: "#c2632b", bg: "#fbede2" },
-  exhibit: { label: "전시회", sub: "키크니 (후기 좋음)", emoji: "🖼️", color: "#7a4ea0", bg: "#f1eaf7" },
-};
-const PRACTICE_TIMES = ["14:00", "15:00"];
-const DEADLINE = new Date(2026, 6, 8, 12, 0, 0);
 
-// Supabase 클라이언트
+// 활동 항목 색/이모지 팔레트 (관리자가 추가할 때 순서대로 배정)
+const ACT_PALETTE = [
+  { emoji: "🎬", color: "#c2632b", bg: "#fbede2" },
+  { emoji: "🖼️", color: "#7a4ea0", bg: "#f1eaf7" },
+  { emoji: "🍽️", color: "#2f7d4f", bg: "#e6f4ea" },
+  { emoji: "🎳", color: "#2f6ca0", bg: "#e6eef7" },
+  { emoji: "🎤", color: "#b23b7a", bg: "#fbe9f2" },
+];
+
+// 기본 설정 (Supabase에 저장된 설정이 없을 때 사용)
+const DEFAULT_CONFIG = {
+  title: "모임 참석 체크",
+  practiceRange: "14:00 - 17:00",
+  practiceTimes: ["14:00", "15:00"],
+  deadline: "2026-07-08T12:00", // datetime-local 형식
+  activityOn: false,
+  activities: [
+    { key: "movie", label: "영화", sub: "토이스토리 5 등" },
+    { key: "exhibit", label: "전시회", sub: "키크니 (후기 좋음)" },
+  ],
+};
+
+const ADMIN_PIN = "0000"; // 관리자 설정 편집용 PIN (원하면 이 값을 바꾸세요)
+
+// Supabase
 const sbReady =
   window.SUPABASE_URL &&
   window.SUPABASE_ANON_KEY &&
@@ -53,8 +71,15 @@ const sb = sbReady
   ? window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY)
   : null;
 
-function getRemaining() {
-  const diff = DEADLINE.getTime() - Date.now();
+function parseDeadline(str) {
+  // "2026-07-08T12:00" -> Date
+  if (!str) return new Date(2100, 0, 1);
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? new Date(2100, 0, 1) : d;
+}
+
+function getRemaining(deadline) {
+  const diff = deadline.getTime() - Date.now();
   if (diff <= 0) return { closed: true, h: 0, m: 0, s: 0 };
   const total = Math.floor(diff / 1000);
   return {
@@ -64,9 +89,32 @@ function getRemaining() {
     s: total % 60,
   };
 }
+
+function fmtDeadline(str) {
+  const d = parseDeadline(str);
+  const mm = d.getMonth() + 1;
+  const dd = d.getDate();
+  const hh = d.getHours();
+  const min = d.getMinutes();
+  const ampm = hh < 12 ? "오전" : "오후";
+  let h12 = hh % 12;
+  if (h12 === 0) h12 = 12;
+  const minStr = min === 0 ? "" : " " + min + "분";
+  return mm + "월 " + dd + "일 " + ampm + " " + h12 + "시" + minStr;
+}
+
 function getMode() {
   const h = (window.location.hash || "").toLowerCase();
   return h.includes("summary") ? "summary" : "respond";
+}
+
+function actConfigToMap(activities) {
+  const map = {};
+  (activities || []).forEach((a, i) => {
+    const p = ACT_PALETTE[i % ACT_PALETTE.length];
+    map[a.key] = { label: a.label, sub: a.sub, ...p };
+  });
+  return map;
 }
 
 async function fetchResponses() {
@@ -82,51 +130,91 @@ async function fetchResponses() {
   return data || [];
 }
 
+async function fetchConfig() {
+  if (!sb) return null;
+  try {
+    const { data, error } = await sb
+      .from("config")
+      .select("data")
+      .eq("id", 1)
+      .maybeSingle();
+    if (error) {
+      console.error(error);
+      return null;
+    }
+    return data && data.data ? data.data : null;
+  } catch (e) {
+    console.error(e);
+    return null;
+  }
+}
+
+async function saveConfig(cfg) {
+  if (!sb) return { error: { message: "Supabase 미설정" } };
+  return await sb.from("config").upsert({ id: 1, data: cfg });
+}
+
 function AttendanceApp() {
   const [mode, setMode] = useState(getMode());
+  const [config, setConfig] = useState(DEFAULT_CONFIG);
   const [responses, setResponses] = useState([]);
   const [loading, setLoading] = useState(true);
+
   const [name, setName] = useState("");
   const [practice, setPractice] = useState("");
   const [practiceTime, setPracticeTime] = useState("");
   const [afterparty, setAfterparty] = useState("");
-  const [menu, setMenu] = useState("");
+  const [activity, setActivity] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [sending, setSending] = useState(false);
-  const [remaining, setRemaining] = useState(getRemaining());
+  const [remaining, setRemaining] = useState(getRemaining(parseDeadline(DEFAULT_CONFIG.deadline)));
+
+  const ACT = actConfigToMap(config.activities);
 
   useEffect(() => {
-    const t = setInterval(() => setRemaining(getRemaining()), 1000);
+    const t = setInterval(
+      () => setRemaining(getRemaining(parseDeadline(config.deadline))),
+      1000
+    );
     return () => clearInterval(t);
-  }, []);
+  }, [config.deadline]);
+
   useEffect(() => {
     const onHash = () => setMode(getMode());
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  const load = async () => {
-    setResponses(await fetchResponses());
+  const loadAll = async () => {
+    const [cfg, res] = await Promise.all([fetchConfig(), fetchResponses()]);
+    if (cfg) setConfig({ ...DEFAULT_CONFIG, ...cfg });
+    setResponses(res);
     setLoading(false);
   };
   useEffect(() => {
-    load();
+    loadAll();
   }, []);
   useEffect(() => {
     if (mode !== "summary") return;
-    const t = setInterval(load, 4000);
+    const t = setInterval(async () => {
+      const [cfg, res] = await Promise.all([fetchConfig(), fetchResponses()]);
+      if (cfg) setConfig({ ...DEFAULT_CONFIG, ...cfg });
+      setResponses(res);
+    }, 4000);
     return () => clearInterval(t);
   }, [mode]);
 
-  const menuNeeded = afterparty === "yes";
+  const activityOn = config.activityOn && (config.activities || []).length > 0;
   const timeNeeded = practice === "yes";
+  const actNeeded = activityOn && afterparty === "yes";
 
   const submit = async () => {
     if (remaining.closed || sending) return;
     if (!name.trim() || !practice || !afterparty) return;
     if (timeNeeded && !practiceTime) return;
+    if (actNeeded && !activity) return;
     if (!sb) {
-      alert("Supabase 설정이 아직 안 됐어요. 파일 상단의 URL/KEY를 입력해 주세요.");
+      alert("Supabase 설정이 아직 안 됐어요.");
       return;
     }
     setSending(true);
@@ -135,10 +223,9 @@ function AttendanceApp() {
       practice,
       practice_time: timeNeeded ? practiceTime : "",
       afterparty,
-      menu: menuNeeded ? menu : "",
+      menu: actNeeded ? activity : "",
       ts: new Date().toISOString(),
     };
-    // 같은 이름 기존 응답 삭제 후 삽입 (덮어쓰기)
     await sb.from("responses").delete().ilike("name", name.trim());
     const { error } = await sb.from("responses").insert(entry);
     setSending(false);
@@ -154,25 +241,26 @@ function AttendanceApp() {
     setPractice("");
     setPracticeTime("");
     setAfterparty("");
-    setMenu("");
+    setActivity("");
     setSubmitted(false);
   };
 
   const remove = async (id) => {
     if (!sb) return;
     await sb.from("responses").delete().eq("id", id);
-    load();
+    loadAll();
   };
 
   const count = (field, val) =>
     responses.filter((r) => r[field] === val).length;
-  const menuCount = (val) => responses.filter((r) => r.menu === val).length;
+  const actCount = (val) => responses.filter((r) => r.menu === val).length;
 
   const canSubmit =
     name.trim() &&
     practice &&
     afterparty &&
-    (!timeNeeded || practiceTime);
+    (!timeNeeded || practiceTime) &&
+    (!actNeeded || activity);
 
   return (
     <div style={s.root}>
@@ -183,7 +271,7 @@ function AttendanceApp() {
               {mode === "summary" ? "📊 집계 화면" : "✍️ 참석 응답"}
             </span>
           </div>
-          <div style={s.logo}>모임 참석 체크</div>
+          <div style={s.logo}>{config.title}</div>
         </header>
 
         {!sbReady && <SetupNotice />}
@@ -192,11 +280,14 @@ function AttendanceApp() {
           <div style={s.loading}>불러오는 중…</div>
         ) : mode === "summary" ? (
           <Summary
+            config={config}
+            setConfig={setConfig}
+            ACT={ACT}
             responses={responses}
             count={count}
-            menuCount={menuCount}
+            actCount={actCount}
             onRemove={remove}
-            onRefresh={load}
+            onRefresh={loadAll}
           />
         ) : submitted ? (
           <div style={s.done}>
@@ -218,16 +309,20 @@ function AttendanceApp() {
               <span>뒤풀이</span>
               <Badge status={afterparty} />
             </div>
+            {actNeeded && activity && (
+              <div style={s.doneRow}>
+                <span>활동</span>
+                <ActBadge act={activity} ACT={ACT} />
+              </div>
+            )}
             <button className="opt-btn" style={s.primaryBtn} onClick={reset}>
               다른 사람도 응답하기
             </button>
           </div>
         ) : (
           <div style={s.form}>
-            <CountdownBanner remaining={remaining} />
-            <p style={s.intro}>
-              연습실·뒤풀이 참석 여부를 알려주세요.
-            </p>
+            <CountdownBanner remaining={remaining} config={config} />
+            <p style={s.intro}>연습실·뒤풀이 참석 여부를 알려주세요.</p>
 
             <label style={s.label}>이름</label>
             <input
@@ -239,15 +334,15 @@ function AttendanceApp() {
 
             <label style={s.label}>
               연습실 참여{" "}
-              <span style={s.labelTime}>( 14:00 - 17:00 )</span>
+              <span style={s.labelTime}>( {config.practiceRange} )</span>
             </label>
             <OptionGroup value={practice} onChange={setPractice} />
 
-            {timeNeeded && (
+            {timeNeeded && (config.practiceTimes || []).length > 0 && (
               <React.Fragment>
                 <label style={s.label}>연습실 참석 시간</label>
                 <div style={s.optGroup}>
-                  {PRACTICE_TIMES.map((t) => {
+                  {config.practiceTimes.map((t) => {
                     const active = practiceTime === t;
                     return (
                       <button
@@ -272,6 +367,42 @@ function AttendanceApp() {
 
             <label style={s.label}>뒤풀이 참여</label>
             <OptionGroup value={afterparty} onChange={setAfterparty} />
+
+            {actNeeded && (
+              <React.Fragment>
+                <label style={s.label}>하고싶은 활동 선택</label>
+                <div style={s.menuGroup}>
+                  {(config.activities || []).map((a) => {
+                    const cfg = ACT[a.key];
+                    const active = activity === a.key;
+                    return (
+                      <button
+                        key={a.key}
+                        className="opt-btn"
+                        style={{
+                          ...s.menuOpt,
+                          borderColor: active ? cfg.color : "#ddd",
+                          background: active ? cfg.bg : "#fff",
+                        }}
+                        onClick={() => setActivity(a.key)}
+                      >
+                        <span style={s.menuEmoji}>{cfg.emoji}</span>
+                        <span
+                          style={{
+                            ...s.menuLabel,
+                            color: active ? cfg.color : "#3a2e1c",
+                            fontWeight: active ? 700 : 600,
+                          }}
+                        >
+                          {cfg.label}
+                        </span>
+                        {cfg.sub && <span style={s.menuSub}>{cfg.sub}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </React.Fragment>
+            )}
 
             <button
               className="opt-btn"
@@ -303,7 +434,7 @@ function AttendanceApp() {
           <div style={s.linkTitle}>🔗 응답용 링크 공유하기</div>
           <p style={s.linkDesc}>
             지금 보고 있는 이 집계 주소에서 끝의 <b>#summary</b>를 뺀 주소가
-            응답용 링크예요. 아래 버튼으로 복사해 단체방에 공유하세요.
+            응답용 링크예요.
           </p>
           <button
             className="opt-btn"
@@ -326,22 +457,18 @@ function AttendanceApp() {
 function SetupNotice() {
   return (
     <div style={s.setup}>
-      <b>⚙️ 설정 필요</b>
-      <br />
-      파일 상단의 <code style={s.code}>SUPABASE_URL</code> /{" "}
-      <code style={s.code}>SUPABASE_ANON_KEY</code>를 본인 값으로 채워야
-      응답이 저장됩니다. (함께 받은 가이드를 참고하세요)
+      <b>⚙️ 설정 필요</b> — Supabase URL/KEY를 채워야 저장됩니다.
     </div>
   );
 }
 
-function CountdownBanner({ remaining }) {
+function CountdownBanner({ remaining, config }) {
   if (remaining.closed) {
     return (
       <div style={{ ...s.banner, background: "#fbe9e9", borderColor: "#e8c4c4" }}>
         <div style={{ ...s.bannerLabel, color: "#b23b3b" }}>⏰ 투표 마감</div>
         <div style={{ ...s.bannerSub, color: "#b23b3b" }}>
-          7월 8일 낮 12시 마감 시간이 지났어요.
+          {fmtDeadline(config.deadline)} 마감 시간이 지났어요.
         </div>
       </div>
     );
@@ -355,7 +482,9 @@ function CountdownBanner({ remaining }) {
         <Unit value={pad(remaining.m)} label="분" />
         <Unit value={pad(remaining.s)} label="초" />
       </div>
-      <div style={s.bannerSub}>7월 8일(화) 낮 12시까지 응답해 주세요</div>
+      <div style={s.bannerSub}>
+        {fmtDeadline(config.deadline)}까지 응답해 주세요
+      </div>
     </div>
   );
 }
@@ -392,39 +521,6 @@ function OptionGroup({ value, onChange }) {
     </div>
   );
 }
-function MenuGroup({ value, onChange }) {
-  return (
-    <div style={s.menuGroup}>
-      {Object.entries(MENUS).map(([key, cfg]) => {
-        const active = value === key;
-        return (
-          <button
-            key={key}
-            className="opt-btn"
-            style={{
-              ...s.menuOpt,
-              borderColor: active ? cfg.color : "#ddd",
-              background: active ? cfg.bg : "#fff",
-            }}
-            onClick={() => onChange(key)}
-          >
-            <span style={s.menuEmoji}>{cfg.emoji}</span>
-            <span
-              style={{
-                ...s.menuLabel,
-                color: active ? cfg.color : "#3a2e1c",
-                fontWeight: active ? 700 : 600,
-              }}
-            >
-              {cfg.label}
-            </span>
-            <span style={s.menuSub}>{cfg.sub}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 function Badge({ status }) {
   const cfg = STATUS[status] || STATUS.yes;
   return (
@@ -433,9 +529,9 @@ function Badge({ status }) {
     </span>
   );
 }
-function MenuBadge({ menu }) {
-  if (!menu) return <span style={{ color: "#bbb", fontSize: 13 }}>-</span>;
-  const cfg = MENUS[menu];
+function ActBadge({ act, ACT }) {
+  if (!act) return <span style={{ color: "#bbb", fontSize: 13 }}>-</span>;
+  const cfg = ACT[act];
   if (!cfg) return <span style={{ color: "#bbb", fontSize: 13 }}>-</span>;
   return (
     <span style={{ background: cfg.bg, color: cfg.color, padding: "3px 12px", borderRadius: 20, fontSize: 13, fontWeight: 700 }}>
@@ -444,20 +540,11 @@ function MenuBadge({ menu }) {
   );
 }
 
-function Summary({ responses, count, menuCount, onRemove, onRefresh }) {
-  if (responses.length === 0) {
-    return (
-      <div style={s.empty}>
-        아직 응답이 없어요.<br />
-        응답용 링크를 공유하고 기다려보세요.
-        <br />
-        <br />
-        <button className="opt-btn" style={s.refreshBtn} onClick={onRefresh}>
-          새로고침
-        </button>
-      </div>
-    );
-  }
+function Summary({ config, setConfig, ACT, responses, count, actCount, onRemove, onRefresh }) {
+  const [showAdmin, setShowAdmin] = useState(false);
+
+  const activityOn = config.activityOn && (config.activities || []).length > 0;
+
   const bars = [
     { field: "practice", title: "연습실 참여" },
     { field: "afterparty", title: "뒤풀이 참여" },
@@ -465,84 +552,328 @@ function Summary({ responses, count, menuCount, onRemove, onRefresh }) {
   const timeCount = (t) =>
     responses.filter((r) => r.practice === "yes" && r.practice_time === t).length;
   const totalPracticeYes = count("practice", "yes");
-  const totalMenu = menuCount("movie") + menuCount("exhibit");
+  const totalAct = (config.activities || []).reduce(
+    (sum, a) => sum + actCount(a.key),
+    0
+  );
 
   return (
     <div style={s.summary}>
-      {bars.map((b) => (
-        <div key={b.field} style={s.statBlock}>
-          <div style={s.statTitle}>{b.title}</div>
-          <div style={s.statRow}>
-            {Object.entries(STATUS).map(([key, cfg]) => {
-              const c = count(b.field, key);
-              const pct = Math.round((c / responses.length) * 100);
-              return (
-                <div key={key} style={s.statItem}>
-                  <div style={{ ...s.statNum, color: cfg.color }}>{c}</div>
-                  <div style={s.statLabel}>{cfg.label}</div>
-                  <div style={s.barTrack}>
-                    <div style={{ ...s.barFill, width: pct + "%", background: cfg.color }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ))}
+      <button
+        className="opt-btn"
+        style={s.adminToggle}
+        onClick={() => setShowAdmin((v) => !v)}
+      >
+        ⚙️ 투표 항목 수정 {showAdmin ? "▲" : "▼"}
+      </button>
 
-      <div style={s.statBlock}>
-        <div style={s.statTitle}>연습실 참석 시간대 (참석자 기준)</div>
-        <div style={s.statRow}>
-          {PRACTICE_TIMES.map((t) => {
-            const c = timeCount(t);
-            const pct = totalPracticeYes ? Math.round((c / totalPracticeYes) * 100) : 0;
-            return (
-              <div key={t} style={s.statItem}>
-                <div style={{ ...s.statNum, color: "#2f7d4f" }}>{c}</div>
-                <div style={s.statLabel}>{t}</div>
-                <div style={s.barTrack}>
-                  <div style={{ ...s.barFill, width: pct + "%", background: "#2f7d4f" }} />
-                </div>
+      {showAdmin && (
+        <AdminPanel
+          config={config}
+          setConfig={setConfig}
+          onClose={() => setShowAdmin(false)}
+        />
+      )}
+
+      {responses.length === 0 ? (
+        <div style={s.empty}>
+          아직 응답이 없어요.<br />
+          응답용 링크를 공유하고 기다려보세요.
+          <br />
+          <br />
+          <button className="opt-btn" style={s.refreshBtn} onClick={onRefresh}>
+            새로고침
+          </button>
+        </div>
+      ) : (
+        <React.Fragment>
+          {bars.map((b) => (
+            <div key={b.field} style={s.statBlock}>
+              <div style={s.statTitle}>{b.title}</div>
+              <div style={s.statRow}>
+                {Object.entries(STATUS).map(([key, cfg]) => {
+                  const c = count(b.field, key);
+                  const pct = Math.round((c / responses.length) * 100);
+                  return (
+                    <div key={key} style={s.statItem}>
+                      <div style={{ ...s.statNum, color: cfg.color }}>{c}</div>
+                      <div style={s.statLabel}>{cfg.label}</div>
+                      <div style={s.barTrack}>
+                        <div style={{ ...s.barFill, width: pct + "%", background: cfg.color }} />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div style={s.tableHead}>
-        <span style={s.tableTitle}>전체 응답 ({responses.length}명)</span>
-        <button className="opt-btn" style={s.refreshBtnSm} onClick={onRefresh}>
-          ↻ 새로고침
-        </button>
-      </div>
-      <div style={s.table}>
-        <div style={{ ...s.trow, ...s.thead }}>
-          <span style={s.cName}>이름</span>
-          <span style={s.cCol}>연습실</span>
-          <span style={s.cCol}>뒤풀이</span>
-          <span style={s.cDel}></span>
-        </div>
-        {responses
-          .slice()
-          .reverse()
-          .map((r) => (
-            <div key={r.id} className="row" style={s.trow}>
-              <span style={s.cName}>{r.name}</span>
-              <span style={s.cCol}>
-                <Badge status={r.practice} />
-                {r.practice === "yes" && r.practice_time && (
-                  <div style={s.cellTime}>{r.practice_time}</div>
-                )}
-              </span>
-              <span style={s.cCol}>
-                <Badge status={r.afterparty} />
-              </span>
-              <button className="opt-btn" style={s.delBtn} onClick={() => onRemove(r.id)} title="삭제">
-                ✕
-              </button>
             </div>
           ))}
+
+          {(config.practiceTimes || []).length > 0 && (
+            <div style={s.statBlock}>
+              <div style={s.statTitle}>연습실 참석 시간대 (참석자 기준)</div>
+              <div style={s.statRow}>
+                {config.practiceTimes.map((t) => {
+                  const c = timeCount(t);
+                  const pct = totalPracticeYes ? Math.round((c / totalPracticeYes) * 100) : 0;
+                  return (
+                    <div key={t} style={s.statItem}>
+                      <div style={{ ...s.statNum, color: "#2f7d4f" }}>{c}</div>
+                      <div style={s.statLabel}>{t}</div>
+                      <div style={s.barTrack}>
+                        <div style={{ ...s.barFill, width: pct + "%", background: "#2f7d4f" }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {activityOn && (
+            <div style={s.statBlock}>
+              <div style={s.statTitle}>하고싶은 활동 (뒤풀이 참석 기준)</div>
+              <div style={s.menuStatRow}>
+                {(config.activities || []).map((a) => {
+                  const cfg = ACT[a.key];
+                  const c = actCount(a.key);
+                  const pct = totalAct ? Math.round((c / totalAct) * 100) : 0;
+                  return (
+                    <div key={a.key} style={{ ...s.menuStatCard, background: cfg.bg }}>
+                      <div style={s.menuStatTop}>
+                        <span style={s.menuStatEmoji}>{cfg.emoji}</span>
+                        <span style={{ ...s.menuStatName, color: cfg.color }}>{cfg.label}</span>
+                      </div>
+                      <div style={{ ...s.menuStatNum, color: cfg.color }}>{c}표</div>
+                      <div style={s.menuBarTrack}>
+                        <div style={{ ...s.barFill, width: pct + "%", background: cfg.color }} />
+                      </div>
+                      <div style={s.menuStatPct}>{pct}%</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div style={s.tableHead}>
+            <span style={s.tableTitle}>전체 응답 ({responses.length}명)</span>
+            <button className="opt-btn" style={s.refreshBtnSm} onClick={onRefresh}>
+              ↻ 새로고침
+            </button>
+          </div>
+          <div style={s.table}>
+            <div style={{ ...s.trow, ...s.thead }}>
+              <span style={s.cName}>이름</span>
+              <span style={s.cCol}>연습실</span>
+              <span style={s.cCol}>뒤풀이</span>
+              {activityOn && <span style={s.cMenu}>활동</span>}
+              <span style={s.cDel}></span>
+            </div>
+            {responses
+              .slice()
+              .reverse()
+              .map((r) => (
+                <div key={r.id} className="row" style={s.trow}>
+                  <span style={s.cName}>{r.name}</span>
+                  <span style={s.cCol}>
+                    <Badge status={r.practice} />
+                    {r.practice === "yes" && r.practice_time && (
+                      <div style={s.cellTime}>{r.practice_time}</div>
+                    )}
+                  </span>
+                  <span style={s.cCol}>
+                    <Badge status={r.afterparty} />
+                  </span>
+                  {activityOn && (
+                    <span style={s.cMenu}>
+                      <ActBadge act={r.menu} ACT={ACT} />
+                    </span>
+                  )}
+                  <button className="opt-btn" style={s.delBtn} onClick={() => onRemove(r.id)} title="삭제">
+                    ✕
+                  </button>
+                </div>
+              ))}
+          </div>
+        </React.Fragment>
+      )}
+    </div>
+  );
+}
+
+function AdminPanel({ config, setConfig, onClose }) {
+  const [authed, setAuthed] = useState(false);
+  const [pin, setPin] = useState("");
+  const [draft, setDraft] = useState(JSON.parse(JSON.stringify(config)));
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  if (!authed) {
+    return (
+      <div style={s.adminBox}>
+        <div style={s.adminTitle}>관리자 확인</div>
+        <p style={s.adminHint}>설정을 바꾸려면 PIN을 입력하세요.</p>
+        <input
+          style={s.input}
+          type="password"
+          placeholder="PIN"
+          value={pin}
+          onChange={(e) => setPin(e.target.value)}
+        />
+        <button
+          className="opt-btn"
+          style={s.adminBtn}
+          onClick={() => {
+            if (pin === ADMIN_PIN) setAuthed(true);
+            else setMsg("PIN이 틀렸어요.");
+          }}
+        >
+          확인
+        </button>
+        {msg && <div style={s.adminErr}>{msg}</div>}
       </div>
+    );
+  }
+
+  const up = (patch) => setDraft((d) => ({ ...d, ...patch }));
+
+  const setTimeAt = (i, val) => {
+    const arr = [...draft.practiceTimes];
+    arr[i] = val;
+    up({ practiceTimes: arr });
+  };
+  const addTime = () => up({ practiceTimes: [...draft.practiceTimes, ""] });
+  const delTime = (i) =>
+    up({ practiceTimes: draft.practiceTimes.filter((_, idx) => idx !== i) });
+
+  const setActAt = (i, field, val) => {
+    const arr = draft.activities.map((a, idx) =>
+      idx === i ? { ...a, [field]: val } : a
+    );
+    up({ activities: arr });
+  };
+  const addAct = () =>
+    up({
+      activities: [
+        ...(draft.activities || []),
+        { key: "act" + Date.now(), label: "", sub: "" },
+      ],
+    });
+  const delAct = (i) =>
+    up({ activities: draft.activities.filter((_, idx) => idx !== i) });
+
+  const save = async () => {
+    setSaving(true);
+    setMsg("");
+    // 빈 시간/활동 정리
+    const clean = {
+      ...draft,
+      practiceTimes: (draft.practiceTimes || []).filter((t) => t.trim()),
+      activities: (draft.activities || []).filter((a) => a.label.trim()),
+    };
+    const { error } = await saveConfig(clean);
+    setSaving(false);
+    if (error) {
+      setMsg("저장 실패: " + error.message);
+      return;
+    }
+    setConfig(clean);
+    setMsg("저장됐어요! 응답 화면에 바로 반영됩니다.");
+  };
+
+  return (
+    <div style={s.adminBox}>
+      <div style={s.adminTitle}>투표 항목 수정</div>
+
+      <label style={s.aLabel}>제목</label>
+      <input
+        style={s.input}
+        value={draft.title}
+        onChange={(e) => up({ title: e.target.value })}
+      />
+
+      <label style={s.aLabel}>연습실 시간 범위 표기</label>
+      <input
+        style={s.input}
+        value={draft.practiceRange}
+        onChange={(e) => up({ practiceRange: e.target.value })}
+        placeholder="예: 14:00 - 17:00"
+      />
+
+      <label style={s.aLabel}>연습실 참석 시간 선택지</label>
+      {(draft.practiceTimes || []).map((t, i) => (
+        <div key={i} style={s.aRow}>
+          <input
+            style={{ ...s.input, flex: 1 }}
+            value={t}
+            onChange={(e) => setTimeAt(i, e.target.value)}
+            placeholder="예: 14:00"
+          />
+          <button className="opt-btn" style={s.aDel} onClick={() => delTime(i)}>
+            삭제
+          </button>
+        </div>
+      ))}
+      <button className="opt-btn" style={s.aAdd} onClick={addTime}>
+        + 시간 추가
+      </button>
+
+      <label style={s.aLabel}>마감 날짜/시간</label>
+      <input
+        style={s.input}
+        type="datetime-local"
+        value={draft.deadline}
+        onChange={(e) => up({ deadline: e.target.value })}
+      />
+
+      <label style={s.aLabel}>
+        <input
+          type="checkbox"
+          checked={!!draft.activityOn}
+          onChange={(e) => up({ activityOn: e.target.checked })}
+          style={{ marginRight: 8 }}
+        />
+        하고싶은 활동 항목 사용 (뒤풀이 참석자에게 표시)
+      </label>
+
+      {draft.activityOn && (
+        <div style={s.actBox}>
+          {(draft.activities || []).map((a, i) => (
+            <div key={i} style={s.actEditRow}>
+              <input
+                style={{ ...s.input, marginBottom: 6 }}
+                value={a.label}
+                onChange={(e) => setActAt(i, "label", e.target.value)}
+                placeholder="활동 이름 (예: 영화)"
+              />
+              <div style={s.aRow}>
+                <input
+                  style={{ ...s.input, flex: 1 }}
+                  value={a.sub}
+                  onChange={(e) => setActAt(i, "sub", e.target.value)}
+                  placeholder="설명 (예: 토이스토리 5 등)"
+                />
+                <button className="opt-btn" style={s.aDel} onClick={() => delAct(i)}>
+                  삭제
+                </button>
+              </div>
+            </div>
+          ))}
+          <button className="opt-btn" style={s.aAdd} onClick={addAct}>
+            + 활동 추가
+          </button>
+        </div>
+      )}
+
+      <button
+        className="opt-btn"
+        style={{ ...s.saveBtn, opacity: saving ? 0.5 : 1 }}
+        onClick={save}
+        disabled={saving}
+      >
+        {saving ? "저장 중…" : "저장하기"}
+      </button>
+      {msg && <div style={s.adminMsg}>{msg}</div>}
     </div>
   );
 }
@@ -555,7 +886,6 @@ const s = {
   modeTag: { fontSize: 13, fontWeight: 700, color: "#c2632b", background: "#fbede2", padding: "5px 12px", borderRadius: 20 },
   logo: { fontFamily: "'Black Han Sans', sans-serif", fontSize: 30, color: "#3a2e1c", letterSpacing: "-1px" },
   setup: { margin: "16px 20px 0", padding: "12px 16px", background: "#fff4e0", border: "1px solid #f0d9a8", borderRadius: 12, fontSize: 13, color: "#8a6a1e", lineHeight: 1.6 },
-  code: { background: "#fbe9c8", padding: "1px 5px", borderRadius: 4, fontSize: 12 },
   loading: { padding: 60, textAlign: "center", color: "#a99a7d" },
   form: { padding: "24px 28px 32px" },
   intro: { color: "#7a6c52", fontSize: 15, margin: "0 0 20px" },
@@ -571,8 +901,8 @@ const s = {
   input: { width: "100%", padding: "13px 16px", border: "1.5px solid #e3d8c2", borderRadius: 12, fontSize: 15, fontFamily: "'Gowun Dodum', sans-serif", background: "#fff", outline: "none" },
   optGroup: { display: "flex", gap: 8 },
   opt: { flex: 1, padding: "13px 0", border: "1.5px solid #ddd", borderRadius: 12, fontSize: 15, fontFamily: "'Gowun Dodum', sans-serif" },
-  menuGroup: { display: "flex", gap: 10 },
-  menuOpt: { flex: 1, padding: "16px 0", border: "1.5px solid #ddd", borderRadius: 14, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, fontFamily: "'Gowun Dodum', sans-serif" },
+  menuGroup: { display: "flex", gap: 10, flexWrap: "wrap" },
+  menuOpt: { flex: "1 1 40%", padding: "16px 0", border: "1.5px solid #ddd", borderRadius: 14, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, fontFamily: "'Gowun Dodum', sans-serif" },
   menuEmoji: { fontSize: 26 },
   menuLabel: { fontSize: 16 },
   menuSub: { fontSize: 12, color: "#a99a7d" },
@@ -586,6 +916,20 @@ const s = {
   empty: { padding: "60px 28px", textAlign: "center", color: "#a99a7d", fontSize: 15, lineHeight: 1.7 },
   refreshBtn: { border: "1.5px solid #e3d8c2", background: "#fff", borderRadius: 10, padding: "10px 20px", color: "#7a6c52", fontFamily: "'Gowun Dodum', sans-serif", fontSize: 14, cursor: "pointer" },
   summary: { padding: "24px 28px 32px" },
+  adminToggle: { width: "100%", padding: "12px 0", marginBottom: 18, border: "1.5px dashed #d9c9a8", borderRadius: 12, background: "#fdf8ee", color: "#a07b1e", fontSize: 14, fontWeight: 700, fontFamily: "'Gowun Dodum', sans-serif", cursor: "pointer" },
+  adminBox: { border: "1.5px solid #ecdcae", background: "#fdf9f0", borderRadius: 16, padding: "18px 18px 22px", marginBottom: 22 },
+  adminTitle: { fontSize: 16, fontWeight: 700, color: "#3a2e1c", marginBottom: 12 },
+  adminHint: { fontSize: 13, color: "#7a6c52", marginBottom: 10 },
+  adminBtn: { width: "100%", marginTop: 10, padding: "12px 0", border: "none", borderRadius: 12, background: "#3a2e1c", color: "#fff", fontSize: 14, fontWeight: 700, fontFamily: "'Gowun Dodum', sans-serif" },
+  adminErr: { color: "#b23b3b", fontSize: 13, marginTop: 8 },
+  adminMsg: { color: "#2f7d4f", fontSize: 13, marginTop: 10, fontWeight: 700 },
+  aLabel: { display: "block", fontSize: 13, color: "#5a4d36", fontWeight: 700, margin: "16px 0 6px" },
+  aRow: { display: "flex", gap: 8, marginBottom: 6 },
+  aDel: { border: "1.5px solid #e8c4c4", background: "#fff", color: "#b23b3b", borderRadius: 10, padding: "0 14px", fontSize: 13, cursor: "pointer", fontFamily: "'Gowun Dodum', sans-serif" },
+  aAdd: { width: "100%", marginTop: 4, padding: "10px 0", border: "1.5px dashed #d9c9a8", background: "#fff", color: "#a07b1e", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "'Gowun Dodum', sans-serif" },
+  actBox: { marginTop: 10, padding: "12px", background: "#fff", border: "1px solid #f0e8d6", borderRadius: 12 },
+  actEditRow: { marginBottom: 12, paddingBottom: 12, borderBottom: "1px solid #f4eddd" },
+  saveBtn: { width: "100%", marginTop: 20, padding: "14px 0", border: "none", borderRadius: 12, background: "#2f7d4f", color: "#fff", fontSize: 15, fontWeight: 700, fontFamily: "'Gowun Dodum', sans-serif" },
   statBlock: { marginBottom: 26 },
   statTitle: { fontSize: 16, fontWeight: 700, color: "#3a2e1c", marginBottom: 14 },
   statRow: { display: "flex", gap: 14 },
@@ -594,8 +938,8 @@ const s = {
   statLabel: { fontSize: 13, color: "#7a6c52", margin: "2px 0 8px" },
   barTrack: { height: 6, background: "#f0e8d6", borderRadius: 6, overflow: "hidden" },
   barFill: { height: "100%", borderRadius: 6, transition: "width .4s ease" },
-  menuStatRow: { display: "flex", gap: 12 },
-  menuStatCard: { flex: 1, borderRadius: 16, padding: "16px 14px", textAlign: "center" },
+  menuStatRow: { display: "flex", gap: 12, flexWrap: "wrap" },
+  menuStatCard: { flex: "1 1 40%", borderRadius: 16, padding: "16px 14px", textAlign: "center" },
   menuStatTop: { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 6 },
   menuStatEmoji: { fontSize: 22 },
   menuStatName: { fontSize: 15, fontWeight: 700 },
