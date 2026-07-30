@@ -112,7 +112,9 @@ function actConfigToMap(activities) {
   const map = {};
   (activities || []).forEach((a, i) => {
     const p = ACT_PALETTE[i % ACT_PALETTE.length];
-    map[a.key] = { label: a.label, sub: a.sub, ...p };
+    // 활동에 emoji 필드가 있으면 그걸 쓰고, 없으면 팔레트 기본값 사용
+    const emoji = a.emoji !== undefined ? a.emoji : p.emoji;
+    map[a.key] = { label: a.label, sub: a.sub, emoji: emoji, color: p.color, bg: p.bg };
   });
   return map;
 }
@@ -386,7 +388,7 @@ function AttendanceApp() {
                         }}
                         onClick={() => setActivity(a.key)}
                       >
-                        <span style={s.menuEmoji}>{cfg.emoji}</span>
+                        {cfg.emoji && <span style={s.menuEmoji}>{cfg.emoji}</span>}
                         <span
                           style={{
                             ...s.menuLabel,
@@ -535,7 +537,7 @@ function ActBadge({ act, ACT }) {
   if (!cfg) return <span style={{ color: "#bbb", fontSize: 13 }}>-</span>;
   return (
     <span style={{ background: cfg.bg, color: cfg.color, padding: "3px 12px", borderRadius: 20, fontSize: 13, fontWeight: 700 }}>
-      {cfg.emoji} {cfg.label}
+      {cfg.emoji ? cfg.emoji + " " : ""}{cfg.label}
     </span>
   );
 }
@@ -640,7 +642,7 @@ function Summary({ config, setConfig, ACT, responses, count, actCount, onRemove,
                   return (
                     <div key={a.key} style={{ ...s.menuStatCard, background: cfg.bg }}>
                       <div style={s.menuStatTop}>
-                        <span style={s.menuStatEmoji}>{cfg.emoji}</span>
+                        {cfg.emoji && <span style={s.menuStatEmoji}>{cfg.emoji}</span>}
                         <span style={{ ...s.menuStatName, color: cfg.color }}>{cfg.label}</span>
                       </div>
                       <div style={{ ...s.menuStatNum, color: cfg.color }}>{c}표</div>
@@ -756,7 +758,7 @@ function AdminPanel({ config, setConfig, onClose }) {
     up({
       activities: [
         ...(draft.activities || []),
-        { key: "act" + Date.now(), label: "", sub: "" },
+        { key: "act" + Date.now(), label: "", sub: "", emoji: "" },
       ],
     });
   const delAct = (i) =>
@@ -840,13 +842,22 @@ function AdminPanel({ config, setConfig, onClose }) {
         <div style={s.actBox}>
           {(draft.activities || []).map((a, i) => (
             <div key={i} style={s.actEditRow}>
-              <input
-                style={{ ...s.input, marginBottom: 6 }}
-                value={a.label}
-                onChange={(e) => setActAt(i, "label", e.target.value)}
-                placeholder="활동 이름 (예: 영화)"
-              />
               <div style={s.aRow}>
+                <input
+                  style={{ ...s.input, width: 70, flex: "0 0 70px", textAlign: "center" }}
+                  value={a.emoji !== undefined ? a.emoji : ""}
+                  onChange={(e) => setActAt(i, "emoji", e.target.value)}
+                  placeholder="🙂"
+                  title="이모지 (비우면 없음)"
+                />
+                <input
+                  style={{ ...s.input, flex: 1 }}
+                  value={a.label}
+                  onChange={(e) => setActAt(i, "label", e.target.value)}
+                  placeholder="활동 이름 (예: 영화)"
+                />
+              </div>
+              <div style={{ ...s.aRow, marginTop: 6 }}>
                 <input
                   style={{ ...s.input, flex: 1 }}
                   value={a.sub}
@@ -856,6 +867,9 @@ function AdminPanel({ config, setConfig, onClose }) {
                 <button className="opt-btn" style={s.aDel} onClick={() => delAct(i)}>
                   삭제
                 </button>
+              </div>
+              <div style={s.emojiHint}>
+                이모지 칸을 비우면 이모지 없이 글자만 표시됩니다.
               </div>
             </div>
           ))}
@@ -929,6 +943,7 @@ const s = {
   aAdd: { width: "100%", marginTop: 4, padding: "10px 0", border: "1.5px dashed #d9c9a8", background: "#fff", color: "#a07b1e", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "'Gowun Dodum', sans-serif" },
   actBox: { marginTop: 10, padding: "12px", background: "#fff", border: "1px solid #f0e8d6", borderRadius: 12 },
   actEditRow: { marginBottom: 12, paddingBottom: 12, borderBottom: "1px solid #f4eddd" },
+  emojiHint: { fontSize: 11, color: "#a99a7d", marginTop: 6 },
   saveBtn: { width: "100%", marginTop: 20, padding: "14px 0", border: "none", borderRadius: 12, background: "#2f7d4f", color: "#fff", fontSize: 15, fontWeight: 700, fontFamily: "'Gowun Dodum', sans-serif" },
   statBlock: { marginBottom: 26 },
   statTitle: { fontSize: 16, fontWeight: 700, color: "#3a2e1c", marginBottom: 14 },
