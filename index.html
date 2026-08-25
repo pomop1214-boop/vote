@@ -50,8 +50,13 @@ const ACT_PALETTE = [
 // 기본 설정 (Supabase에 저장된 설정이 없을 때 사용)
 const DEFAULT_CONFIG = {
   title: "모임 참석 체크",
+  intro: "연습실·뒤풀이 참석 여부를 알려주세요.",
+  practiceLabel: "연습실 참여",
   practiceRange: "14:00 - 17:00",
+  practiceTimeLabel: "연습실 참석 시간",
   practiceTimes: ["14:00", "15:00"],
+  afterpartyLabel: "뒤풀이 참여",
+  activityLabel: "하고싶은 활동 선택",
   deadline: "2026-07-08T12:00", // datetime-local 형식
   activityOn: false,
   activities: [
@@ -324,7 +329,7 @@ function AttendanceApp() {
         ) : (
           <div style={s.form}>
             <CountdownBanner remaining={remaining} config={config} />
-            <p style={s.intro}>연습실·뒤풀이 참석 여부를 알려주세요.</p>
+            <p style={s.intro}>{config.intro}</p>
 
             <label style={s.label}>이름</label>
             <input
@@ -335,14 +340,14 @@ function AttendanceApp() {
             />
 
             <label style={s.label}>
-              연습실 참여{" "}
+              {config.practiceLabel}{" "}
               <span style={s.labelTime}>( {config.practiceRange} )</span>
             </label>
             <OptionGroup value={practice} onChange={setPractice} />
 
             {timeNeeded && (config.practiceTimes || []).length > 0 && (
               <React.Fragment>
-                <label style={s.label}>연습실 참석 시간</label>
+                <label style={s.label}>{config.practiceTimeLabel}</label>
                 <div style={s.optGroup}>
                   {config.practiceTimes.map((t) => {
                     const active = practiceTime === t;
@@ -367,12 +372,12 @@ function AttendanceApp() {
               </React.Fragment>
             )}
 
-            <label style={s.label}>뒤풀이 참여</label>
+            <label style={s.label}>{config.afterpartyLabel}</label>
             <OptionGroup value={afterparty} onChange={setAfterparty} />
 
             {actNeeded && (
               <React.Fragment>
-                <label style={s.label}>하고싶은 활동 선택</label>
+                <label style={s.label}>{config.activityLabel}</label>
                 <div style={s.menuGroup}>
                   {(config.activities || []).map((a) => {
                     const cfg = ACT[a.key];
@@ -428,9 +433,20 @@ function AttendanceApp() {
       </div>
 
       {mode !== "summary" ? (
-        <p style={s.foot}>
-          이 링크는 <b>참석 응답용</b>입니다. 단체방에 그대로 공유하세요.
-        </p>
+        <React.Fragment>
+          <p style={s.foot}>
+            이 링크는 <b>참석 응답용</b>입니다. 단체방에 그대로 공유하세요.
+          </p>
+          <button
+            className="opt-btn"
+            style={s.adminLink}
+            onClick={() => {
+              window.location.hash = "summary";
+            }}
+          >
+            ⚙️ 관리자 페이지 (집계·항목 수정)
+          </button>
+        </React.Fragment>
       ) : (
         <div style={s.linkBox}>
           <div style={s.linkTitle}>🔗 응답용 링크 공유하기</div>
@@ -794,6 +810,50 @@ function AdminPanel({ config, setConfig, onClose }) {
         onChange={(e) => up({ title: e.target.value })}
       />
 
+      <label style={s.aLabel}>안내 문구 (제목 아래 한 줄)</label>
+      <input
+        style={s.input}
+        value={draft.intro !== undefined ? draft.intro : ""}
+        onChange={(e) => up({ intro: e.target.value })}
+        placeholder="예: 연습실·뒤풀이 참석 여부를 알려주세요."
+      />
+
+      <div style={s.aSectionTitle}>항목 제목</div>
+
+      <label style={s.aLabel}>연습실 참여 제목</label>
+      <input
+        style={s.input}
+        value={draft.practiceLabel !== undefined ? draft.practiceLabel : ""}
+        onChange={(e) => up({ practiceLabel: e.target.value })}
+        placeholder="예: 연습실 참여"
+      />
+
+      <label style={s.aLabel}>연습실 참석 시간 제목</label>
+      <input
+        style={s.input}
+        value={draft.practiceTimeLabel !== undefined ? draft.practiceTimeLabel : ""}
+        onChange={(e) => up({ practiceTimeLabel: e.target.value })}
+        placeholder="예: 연습실 참석 시간"
+      />
+
+      <label style={s.aLabel}>뒤풀이 참여 제목</label>
+      <input
+        style={s.input}
+        value={draft.afterpartyLabel !== undefined ? draft.afterpartyLabel : ""}
+        onChange={(e) => up({ afterpartyLabel: e.target.value })}
+        placeholder="예: 뒤풀이 참여"
+      />
+
+      <label style={s.aLabel}>하고싶은 활동 선택 제목</label>
+      <input
+        style={s.input}
+        value={draft.activityLabel !== undefined ? draft.activityLabel : ""}
+        onChange={(e) => up({ activityLabel: e.target.value })}
+        placeholder="예: 하고싶은 활동 선택"
+      />
+
+      <div style={s.aSectionTitle}>세부 설정</div>
+
       <label style={s.aLabel}>연습실 시간 범위 표기</label>
       <input
         style={s.input}
@@ -974,6 +1034,8 @@ const s = {
   cDel: { flex: "0 0 22px" },
   delBtn: { flex: "0 0 22px", border: "none", background: "none", color: "#ccc", cursor: "pointer", fontSize: 13 },
   foot: { maxWidth: 480, fontSize: 13, color: "#8a7a5c", textAlign: "center", marginTop: 16, lineHeight: 1.6 },
+  adminLink: { maxWidth: 480, width: "100%", marginTop: 10, padding: "11px 0", border: "1.5px dashed #d9c9a8", borderRadius: 12, background: "#fdf8ee", color: "#a07b1e", fontSize: 13, fontWeight: 700, fontFamily: "'Gowun Dodum', sans-serif", cursor: "pointer" },
+  aSectionTitle: { fontSize: 13, fontWeight: 700, color: "#c2632b", marginTop: 22, marginBottom: 4, paddingBottom: 6, borderBottom: "1.5px solid #f0e2c8" },
   linkBox: { maxWidth: 480, width: "100%", marginTop: 16, background: "#fffdf8", border: "1px solid #efe6d4", borderRadius: 16, padding: "18px 20px" },
   linkTitle: { fontSize: 15, fontWeight: 700, color: "#3a2e1c", marginBottom: 8 },
   linkDesc: { fontSize: 13, color: "#7a6c52", lineHeight: 1.6, margin: "0 0 14px" },
