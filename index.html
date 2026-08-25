@@ -52,9 +52,12 @@ const DEFAULT_CONFIG = {
   title: "모임 참석 체크",
   intro: "연습실·뒤풀이 참석 여부를 알려주세요.",
   practiceLabel: "연습실 참여",
+  practiceOn: true,
   practiceRange: "14:00 - 17:00",
+  practiceTimeOn: true,
   practiceTimeLabel: "연습실 참석 시간",
   practiceTimes: ["14:00", "15:00"],
+  afterpartyOn: true,
   afterpartyLabel: "뒤풀이 참여",
   activityLabel: "하고싶은 활동 선택",
   deadline: "2026-07-08T12:00", // datetime-local 형식
@@ -65,7 +68,7 @@ const DEFAULT_CONFIG = {
   ],
 };
 
-const ADMIN_PIN = "6195"; // 관리자 설정 편집용 PIN (원하면 이 값을 바꾸세요)
+const ADMIN_PIN = "0000"; // 관리자 설정 편집용 PIN (원하면 이 값을 바꾸세요)
 
 // Supabase
 const sbReady =
@@ -211,13 +214,21 @@ function AttendanceApp() {
     return () => clearInterval(t);
   }, [mode]);
 
+  const practiceOn = config.practiceOn !== false;
+  const afterpartyOn = config.afterpartyOn !== false;
   const activityOn = config.activityOn && (config.activities || []).length > 0;
-  const timeNeeded = practice === "yes";
-  const actNeeded = activityOn && afterparty === "yes";
+  const timeNeeded =
+    practiceOn &&
+    config.practiceTimeOn !== false &&
+    practice === "yes" &&
+    (config.practiceTimes || []).length > 0;
+  const actNeeded = activityOn && (!afterpartyOn || afterparty === "yes");
 
   const submit = async () => {
     if (remaining.closed || sending) return;
-    if (!name.trim() || !practice || !afterparty) return;
+    if (!name.trim()) return;
+    if (practiceOn && !practice) return;
+    if (afterpartyOn && !afterparty) return;
     if (timeNeeded && !practiceTime) return;
     if (actNeeded && !activity) return;
     if (!sb) {
@@ -227,9 +238,9 @@ function AttendanceApp() {
     setSending(true);
     const entry = {
       name: name.trim(),
-      practice,
+      practice: practiceOn ? practice : "",
       practice_time: timeNeeded ? practiceTime : "",
-      afterparty,
+      afterparty: afterpartyOn ? afterparty : "",
       menu: actNeeded ? activity : "",
       ts: new Date().toISOString(),
     };
@@ -264,8 +275,8 @@ function AttendanceApp() {
 
   const canSubmit =
     name.trim() &&
-    practice &&
-    afterparty &&
+    (!practiceOn || practice) &&
+    (!afterpartyOn || afterparty) &&
     (!timeNeeded || practiceTime) &&
     (!actNeeded || activity);
 
@@ -303,19 +314,23 @@ function AttendanceApp() {
             <p style={s.doneSub}>
               <b>{name}</b>님의 참석 여부가 저장됐어요.
             </p>
-            <div style={s.doneRow}>
-              <span>연습실</span>
-              <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <Badge status={practice} />
-                {practice === "yes" && practiceTime && (
-                  <span style={s.timeChip}>{practiceTime}</span>
-                )}
-              </span>
-            </div>
-            <div style={s.doneRow}>
-              <span>뒤풀이</span>
-              <Badge status={afterparty} />
-            </div>
+            {practiceOn && (
+              <div style={s.doneRow}>
+                <span>{config.practiceLabel}</span>
+                <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <Badge status={practice} />
+                  {practice === "yes" && practiceTime && (
+                    <span style={s.timeChip}>{practiceTime}</span>
+                  )}
+                </span>
+              </div>
+            )}
+            {afterpartyOn && (
+              <div style={s.doneRow}>
+                <span>{config.afterpartyLabel}</span>
+                <Badge status={afterparty} />
+              </div>
+            )}
             {actNeeded && activity && (
               <div style={s.doneRow}>
                 <span>활동</span>
@@ -339,13 +354,19 @@ function AttendanceApp() {
               onChange={(e) => setName(e.target.value)}
             />
 
-            <label style={s.label}>
-              {config.practiceLabel}{" "}
-              <span style={s.labelTime}>( {config.practiceRange} )</span>
-            </label>
-            <OptionGroup value={practice} onChange={setPractice} />
+            {practiceOn && (
+              <React.Fragment>
+                <label style={s.label}>
+                  {config.practiceLabel}
+                  {config.practiceRange && config.practiceRange.trim() && (
+                    <span style={s.labelTime}> ( {config.practiceRange} )</span>
+                  )}
+                </label>
+                <OptionGroup value={practice} onChange={setPractice} />
+              </React.Fragment>
+            )}
 
-            {timeNeeded && (config.practiceTimes || []).length > 0 && (
+            {timeNeeded && (
               <React.Fragment>
                 <label style={s.label}>{config.practiceTimeLabel}</label>
                 <div style={s.optGroup}>
@@ -372,8 +393,12 @@ function AttendanceApp() {
               </React.Fragment>
             )}
 
-            <label style={s.label}>{config.afterpartyLabel}</label>
-            <OptionGroup value={afterparty} onChange={setAfterparty} />
+            {afterpartyOn && (
+              <React.Fragment>
+                <label style={s.label}>{config.afterpartyLabel}</label>
+                <OptionGroup value={afterparty} onChange={setAfterparty} />
+              </React.Fragment>
+            )}
 
             {actNeeded && (
               <React.Fragment>
@@ -613,12 +638,19 @@ function Summary({ config, setConfig, ACT, responses, count, actCount, onRemove,
     );
   }
 
+  const practiceOn = config.practiceOn !== false;
+  const afterpartyOn = config.afterpartyOn !== false;
+  const practiceTimeOn =
+    practiceOn &&
+    config.practiceTimeOn !== false &&
+    (config.practiceTimes || []).length > 0;
   const activityOn = config.activityOn && (config.activities || []).length > 0;
 
-  const bars = [
-    { field: "practice", title: "연습실 참여" },
-    { field: "afterparty", title: "뒤풀이 참여" },
-  ];
+  const bars = [];
+  if (practiceOn)
+    bars.push({ field: "practice", title: config.practiceLabel || "연습실 참여" });
+  if (afterpartyOn)
+    bars.push({ field: "afterparty", title: config.afterpartyLabel || "뒤풀이 참여" });
   const timeCount = (t) =>
     responses.filter((r) => r.practice === "yes" && r.practice_time === t).length;
   const totalPracticeYes = count("practice", "yes");
@@ -678,9 +710,11 @@ function Summary({ config, setConfig, ACT, responses, count, actCount, onRemove,
             </div>
           ))}
 
-          {(config.practiceTimes || []).length > 0 && (
+          {practiceTimeOn && (
             <div style={s.statBlock}>
-              <div style={s.statTitle}>연습실 참석 시간대 (참석자 기준)</div>
+              <div style={s.statTitle}>
+                {config.practiceTimeLabel || "연습실 참석 시간"} (참석자 기준)
+              </div>
               <div style={s.statRow}>
                 {config.practiceTimes.map((t) => {
                   const c = timeCount(t);
@@ -734,8 +768,8 @@ function Summary({ config, setConfig, ACT, responses, count, actCount, onRemove,
           <div style={s.table}>
             <div style={{ ...s.trow, ...s.thead }}>
               <span style={s.cName}>이름</span>
-              <span style={s.cCol}>연습실</span>
-              <span style={s.cCol}>뒤풀이</span>
+              {practiceOn && <span style={s.cCol}>연습실</span>}
+              {afterpartyOn && <span style={s.cCol}>뒤풀이</span>}
               {activityOn && <span style={s.cMenu}>활동</span>}
               <span style={s.cDel}></span>
             </div>
@@ -745,15 +779,19 @@ function Summary({ config, setConfig, ACT, responses, count, actCount, onRemove,
               .map((r) => (
                 <div key={r.id} className="row" style={s.trow}>
                   <span style={s.cName}>{r.name}</span>
-                  <span style={s.cCol}>
-                    <Badge status={r.practice} />
-                    {r.practice === "yes" && r.practice_time && (
-                      <div style={s.cellTime}>{r.practice_time}</div>
-                    )}
-                  </span>
-                  <span style={s.cCol}>
-                    <Badge status={r.afterparty} />
-                  </span>
+                  {practiceOn && (
+                    <span style={s.cCol}>
+                      <Badge status={r.practice} />
+                      {r.practice === "yes" && r.practice_time && (
+                        <div style={s.cellTime}>{r.practice_time}</div>
+                      )}
+                    </span>
+                  )}
+                  {afterpartyOn && (
+                    <span style={s.cCol}>
+                      <Badge status={r.afterparty} />
+                    </span>
+                  )}
                   {activityOn && (
                     <span style={s.cMenu}>
                       <ActBadge act={r.menu} ACT={ACT} />
@@ -843,65 +881,104 @@ function AdminPanel({ config, setConfig, onClose }) {
 
       <div style={s.aSectionTitle}>항목 제목</div>
 
-      <label style={s.aLabel}>연습실 참여 제목</label>
-      <input
-        style={s.input}
-        value={draft.practiceLabel !== undefined ? draft.practiceLabel : ""}
-        onChange={(e) => up({ practiceLabel: e.target.value })}
-        placeholder="예: 연습실 참여"
-      />
+      <label style={s.aToggle}>
+        <input
+          type="checkbox"
+          checked={draft.practiceOn !== false}
+          onChange={(e) => up({ practiceOn: e.target.checked })}
+          style={{ marginRight: 8 }}
+        />
+        연습실 참여 항목 사용
+      </label>
+      {draft.practiceOn !== false && (
+        <React.Fragment>
+          <label style={s.aLabel}>연습실 참여 제목</label>
+          <input
+            style={s.input}
+            value={draft.practiceLabel !== undefined ? draft.practiceLabel : ""}
+            onChange={(e) => up({ practiceLabel: e.target.value })}
+            placeholder="예: 연습실 참여"
+          />
 
-      <label style={s.aLabel}>연습실 참석 시간 제목</label>
-      <input
-        style={s.input}
-        value={draft.practiceTimeLabel !== undefined ? draft.practiceTimeLabel : ""}
-        onChange={(e) => up({ practiceTimeLabel: e.target.value })}
-        placeholder="예: 연습실 참석 시간"
-      />
+          <label style={s.aToggle}>
+            <input
+              type="checkbox"
+              checked={draft.practiceTimeOn !== false}
+              onChange={(e) => up({ practiceTimeOn: e.target.checked })}
+              style={{ marginRight: 8 }}
+            />
+            연습실 참석 시간 항목 사용
+          </label>
+          {draft.practiceTimeOn !== false && (
+            <React.Fragment>
+              <label style={s.aLabel}>연습실 참석 시간 제목</label>
+              <input
+                style={s.input}
+                value={draft.practiceTimeLabel !== undefined ? draft.practiceTimeLabel : ""}
+                onChange={(e) => up({ practiceTimeLabel: e.target.value })}
+                placeholder="예: 연습실 참석 시간"
+              />
+            </React.Fragment>
+          )}
+        </React.Fragment>
+      )}
 
-      <label style={s.aLabel}>뒤풀이 참여 제목</label>
-      <input
-        style={s.input}
-        value={draft.afterpartyLabel !== undefined ? draft.afterpartyLabel : ""}
-        onChange={(e) => up({ afterpartyLabel: e.target.value })}
-        placeholder="예: 뒤풀이 참여"
-      />
-
-      <label style={s.aLabel}>하고싶은 활동 선택 제목</label>
-      <input
-        style={s.input}
-        value={draft.activityLabel !== undefined ? draft.activityLabel : ""}
-        onChange={(e) => up({ activityLabel: e.target.value })}
-        placeholder="예: 하고싶은 활동 선택"
-      />
+      <label style={s.aToggle}>
+        <input
+          type="checkbox"
+          checked={draft.afterpartyOn !== false}
+          onChange={(e) => up({ afterpartyOn: e.target.checked })}
+          style={{ marginRight: 8 }}
+        />
+        뒤풀이 참여 항목 사용
+      </label>
+      {draft.afterpartyOn !== false && (
+        <React.Fragment>
+          <label style={s.aLabel}>뒤풀이 참여 제목</label>
+          <input
+            style={s.input}
+            value={draft.afterpartyLabel !== undefined ? draft.afterpartyLabel : ""}
+            onChange={(e) => up({ afterpartyLabel: e.target.value })}
+            placeholder="예: 뒤풀이 참여"
+          />
+        </React.Fragment>
+      )}
 
       <div style={s.aSectionTitle}>세부 설정</div>
 
-      <label style={s.aLabel}>연습실 시간 범위 표기</label>
-      <input
-        style={s.input}
-        value={draft.practiceRange}
-        onChange={(e) => up({ practiceRange: e.target.value })}
-        placeholder="예: 14:00 - 17:00"
-      />
-
-      <label style={s.aLabel}>연습실 참석 시간 선택지</label>
-      {(draft.practiceTimes || []).map((t, i) => (
-        <div key={i} style={s.aRow}>
+      {draft.practiceOn !== false && (
+        <React.Fragment>
+          <label style={s.aLabel}>연습실 시간 범위 표기 (비우면 표시 안 됨)</label>
           <input
-            style={{ ...s.input, flex: 1 }}
-            value={t}
-            onChange={(e) => setTimeAt(i, e.target.value)}
-            placeholder="예: 14:00"
+            style={s.input}
+            value={draft.practiceRange !== undefined ? draft.practiceRange : ""}
+            onChange={(e) => up({ practiceRange: e.target.value })}
+            placeholder="예: 14:00 - 17:00"
           />
-          <button className="opt-btn" style={s.aDel} onClick={() => delTime(i)}>
-            삭제
+        </React.Fragment>
+      )}
+
+      {draft.practiceOn !== false && draft.practiceTimeOn !== false && (
+        <React.Fragment>
+          <label style={s.aLabel}>연습실 참석 시간 선택지</label>
+          {(draft.practiceTimes || []).map((t, i) => (
+            <div key={i} style={s.aRow}>
+              <input
+                style={{ ...s.input, flex: 1 }}
+                value={t}
+                onChange={(e) => setTimeAt(i, e.target.value)}
+                placeholder="예: 14:00"
+              />
+              <button className="opt-btn" style={s.aDel} onClick={() => delTime(i)}>
+                삭제
+              </button>
+            </div>
+          ))}
+          <button className="opt-btn" style={s.aAdd} onClick={addTime}>
+            + 시간 추가
           </button>
-        </div>
-      ))}
-      <button className="opt-btn" style={s.aAdd} onClick={addTime}>
-        + 시간 추가
-      </button>
+        </React.Fragment>
+      )}
 
       <label style={s.aLabel}>마감 날짜/시간</label>
       <input
@@ -911,15 +988,27 @@ function AdminPanel({ config, setConfig, onClose }) {
         onChange={(e) => up({ deadline: e.target.value })}
       />
 
-      <label style={s.aLabel}>
+      <label style={s.aToggle}>
         <input
           type="checkbox"
           checked={!!draft.activityOn}
           onChange={(e) => up({ activityOn: e.target.checked })}
           style={{ marginRight: 8 }}
         />
-        하고싶은 활동 항목 사용 (뒤풀이 참석자에게 표시)
+        하고싶은 활동 항목 사용
       </label>
+
+      {draft.activityOn && (
+        <React.Fragment>
+          <label style={s.aLabel}>하고싶은 활동 제목</label>
+          <input
+            style={s.input}
+            value={draft.activityLabel !== undefined ? draft.activityLabel : ""}
+            onChange={(e) => up({ activityLabel: e.target.value })}
+            placeholder="예: 하고싶은 활동 선택"
+          />
+        </React.Fragment>
+      )}
 
       {draft.activityOn && (
         <div style={s.actBox}>
@@ -1027,6 +1116,7 @@ const s = {
   adminErr: { color: "#A32D2D", fontSize: 13, marginTop: 8 },
   adminMsg: { color: "#1D9E75", fontSize: 13, marginTop: 10, fontWeight: 700 },
   aLabel: { display: "block", fontSize: 13, color: "#712B13", fontWeight: 700, margin: "16px 0 6px" },
+  aToggle: { display: "block", fontSize: 13, color: "#4A1B0C", fontWeight: 700, margin: "18px 0 4px", padding: "10px 12px", background: "#FDEAE4", borderRadius: 10, cursor: "pointer" },
   aRow: { display: "flex", gap: 8, marginBottom: 6 },
   aDel: { border: "1.5px solid #F7C1C1", background: "#fff", color: "#A32D2D", borderRadius: 10, padding: "0 14px", fontSize: 13, cursor: "pointer", fontFamily: "'Gowun Dodum', sans-serif" },
   aAdd: { width: "100%", marginTop: 4, padding: "10px 0", border: "1.5px dashed #F0997B", background: "#fff", color: "#993C1D", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "'Gowun Dodum', sans-serif" },
