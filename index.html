@@ -65,7 +65,7 @@ const DEFAULT_CONFIG = {
   ],
 };
 
-const ADMIN_PIN = "6195"; // 관리자 설정 편집용 PIN (원하면 이 값을 바꾸세요)
+const ADMIN_PIN = "0000"; // 관리자 설정 편집용 PIN (원하면 이 값을 바꾸세요)
 
 // Supabase
 const sbReady =
@@ -559,7 +559,59 @@ function ActBadge({ act, ACT }) {
 }
 
 function Summary({ config, setConfig, ACT, responses, count, actCount, onRemove, onRefresh }) {
+  const [unlocked, setUnlocked] = useState(false);
+  const [pin, setPin] = useState("");
+  const [pinErr, setPinErr] = useState("");
   const [showAdmin, setShowAdmin] = useState(false);
+
+  const tryUnlock = () => {
+    if (pin === ADMIN_PIN) {
+      setUnlocked(true);
+      setPinErr("");
+    } else {
+      setPinErr("PIN이 올바르지 않아요.");
+    }
+  };
+
+  if (!unlocked) {
+    return (
+      <div style={s.lockWrap}>
+        <div style={s.lockIcon}>🔒</div>
+        <div style={s.lockTitle}>관리자 확인</div>
+        <p style={s.lockHint}>
+          집계 결과와 항목 수정은 관리자만 볼 수 있어요.
+          <br />
+          PIN을 입력해 주세요.
+        </p>
+        <input
+          style={{ ...s.input, textAlign: "center", letterSpacing: 4 }}
+          type="password"
+          placeholder="••••"
+          value={pin}
+          onChange={(e) => {
+            setPin(e.target.value);
+            setPinErr("");
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") tryUnlock();
+          }}
+        />
+        <button className="opt-btn" style={s.lockBtn} onClick={tryUnlock}>
+          확인
+        </button>
+        {pinErr && <div style={s.adminErr}>{pinErr}</div>}
+        <button
+          className="opt-btn"
+          style={s.lockBack}
+          onClick={() => {
+            window.location.hash = "";
+          }}
+        >
+          ← 응답 화면으로 돌아가기
+        </button>
+      </div>
+    );
+  }
 
   const activityOn = config.activityOn && (config.activities || []).length > 0;
 
@@ -720,38 +772,9 @@ function Summary({ config, setConfig, ACT, responses, count, actCount, onRemove,
 }
 
 function AdminPanel({ config, setConfig, onClose }) {
-  const [authed, setAuthed] = useState(false);
-  const [pin, setPin] = useState("");
   const [draft, setDraft] = useState(JSON.parse(JSON.stringify(config)));
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
-
-  if (!authed) {
-    return (
-      <div style={s.adminBox}>
-        <div style={s.adminTitle}>관리자 확인</div>
-        <p style={s.adminHint}>설정을 바꾸려면 PIN을 입력하세요.</p>
-        <input
-          style={s.input}
-          type="password"
-          placeholder="PIN"
-          value={pin}
-          onChange={(e) => setPin(e.target.value)}
-        />
-        <button
-          className="opt-btn"
-          style={s.adminBtn}
-          onClick={() => {
-            if (pin === ADMIN_PIN) setAuthed(true);
-            else setMsg("PIN이 틀렸어요.");
-          }}
-        >
-          확인
-        </button>
-        {msg && <div style={s.adminErr}>{msg}</div>}
-      </div>
-    );
-  }
 
   const up = (patch) => setDraft((d) => ({ ...d, ...patch }));
 
@@ -990,6 +1013,12 @@ const s = {
   empty: { padding: "60px 28px", textAlign: "center", color: "#C08A76", fontSize: 15, lineHeight: 1.7 },
   refreshBtn: { border: "1.5px solid #F0BFAE", background: "#fff", borderRadius: 10, padding: "10px 20px", color: "#993C1D", fontFamily: "'Gowun Dodum', sans-serif", fontSize: 14, cursor: "pointer" },
   summary: { padding: "24px 28px 32px" },
+  lockWrap: { padding: "48px 32px 40px", textAlign: "center" },
+  lockIcon: { fontSize: 40, marginBottom: 14 },
+  lockTitle: { fontSize: 20, fontWeight: 700, color: "#4A1B0C", marginBottom: 8 },
+  lockHint: { fontSize: 14, color: "#993C1D", lineHeight: 1.7, marginBottom: 20 },
+  lockBtn: { width: "100%", marginTop: 12, padding: "14px 0", border: "none", borderRadius: 12, background: "#E8503A", color: "#fff", fontSize: 15, fontWeight: 700, fontFamily: "'Gowun Dodum', sans-serif" },
+  lockBack: { width: "100%", marginTop: 14, padding: "8px 0", border: "none", background: "none", color: "#C08A76", fontSize: 13, fontFamily: "'Gowun Dodum', sans-serif", cursor: "pointer" },
   adminToggle: { width: "100%", padding: "12px 0", marginBottom: 18, border: "1.5px dashed #F0997B", borderRadius: 12, background: "#FFF7F4", color: "#993C1D", fontSize: 14, fontWeight: 700, fontFamily: "'Gowun Dodum', sans-serif", cursor: "pointer" },
   adminBox: { border: "1.5px solid #F5C4B3", background: "#FFF9F6", borderRadius: 16, padding: "18px 18px 22px", marginBottom: 22 },
   adminTitle: { fontSize: 16, fontWeight: 700, color: "#4A1B0C", marginBottom: 12 },
